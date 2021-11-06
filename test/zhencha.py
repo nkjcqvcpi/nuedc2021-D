@@ -1,52 +1,9 @@
-import socket
 import cv2
 import numpy as np
 import time
 from LaserPointer import Pendulum
 
-
-def send():
-    HOST = '192.168.199.131'
-    PORT = 8001
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.connect((HOST, PORT))
-    time.sleep(2)
-    sock.send(b'1')
-    print(sock.recv(1024).decode())
-    sock.close()
-
-
-pointer = Pendulum((640, 360))
-
-color_dist = {'Lower': np.array([0, 60, 60]), 'Upper': np.array([6, 255, 255])}
-cam = cv2.VideoCapture(0)
-frame_cnt = 0
-while cam.isOpened():
-    _, frame = cam.read()
-    gs_frame = cv2.GaussianBlur(frame, (5, 5), 0)  # 高斯模糊
-    hsv = cv2.cvtColor(gs_frame, cv2.COLOR_BGR2HSV)  # 转化成HSV图像
-    erode_hsv = cv2.erode(hsv, None, iterations=2)  # 腐蚀粗的变细
-    inRange_hsv = cv2.inRange(erode_hsv, color_dist['Lower'], color_dist['Upper'])
-    cnts = cv2.findContours(inRange_hsv.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[-2]
-
-    if len(cnts) != 0:
-        c = max(cnts, key=cv2.contourArea)
-        rect = cv2.minAreaRect(c)
-        bbox = cv2.boxPoints(rect)
-        pointer.update(rect[2], bbox)
-        # if frame_cnt == 13:
-        #     pointer.calibration()
-        # elif frame_cnt == 100:
-        #     print(pointer.length())
-        cv2.drawContours(frame, [np.int0(bbox)], -1, (0, 255, 255), 2)
-        frame_cnt += 1
-
-    cv2.imshow('dect', frame)
-
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
-
-cv2.destroyAllWindows()
+pd = Pendulum((640, 360))
 
 
 def py_cpu_nms(dets, thresh):
@@ -78,8 +35,7 @@ def py_cpu_nms(dets, thresh):
         inds = np.where(ovr <= thresh)[0]
         # order里面只保留与窗口i交叠面积小于threshold的那些窗口，由于ovr长度比order长度少1(不包含i)，所以inds+1对应到保留的窗口
         order = order[inds + 1]
-
-    return keep
+    return keep[0]
 
 
 class Detector(object):
@@ -88,6 +44,7 @@ class Detector(object):
         self.nms_threshold = 0.3
         self.time = 1/frame_num
         self.es = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k_size, k_size))
+        self.frame_cnt = 0
 
     def catch_video(self, video_index=0, k_size=7, iterations=3, threshold=20, bias_num=1, min_area=360, show_test=True,
                     enhance=True):
@@ -101,6 +58,8 @@ class Detector(object):
         if not bias_num > 0:
             raise Exception('bias_num must > 0')
         cap = cv2.VideoCapture(video_index)  # 创建摄像头识别类
+        cap.set(3, 640)
+        cap.set(4, 360)
         if not cap.isOpened():
             # 如果没有检测到摄像头，报错
             raise Exception('Check if the camera is on.')
@@ -126,8 +85,11 @@ class Detector(object):
             cnts, _ = cv2.findContours(mask.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
             bounds = self.nms_cnts(cnts, mask, min_area)
-            for b in bounds:
-                cv2.drawContours(frame, [np.int0(b)], -1, (0, 255, 255), 2)
+            cv2.line(frame, (int(pd.pointer.refx), 0), (int(pd.pointer.refx), 360), (0, 255, 255), 2)
+            if bounds is not None:
+                cv2.drawContours(frame, [np.int0(bounds)], -1, (0, 255, 255), 2)
+            # for b in bounds:
+            #     cv2.drawContours(frame, [np.int0(b[0])], -1, (0, 255, 255), 2)
                 # x, y, w, h = b
                 # cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
             cv2.imshow(self.name, frame)  # 在window上显示图片
@@ -143,18 +105,26 @@ class Detector(object):
         cv2.destroyAllWindows()
 
     def nms_cnts(self, cnts, mask, min_area):
-        bounds = [cv2.boundingRect(c) for c in cnts if cv2.contourArea(c) > min_area]
-        c = [max(c, key=cv2.contourArea) for c in cnts if cv2.contourArea(c) > min_area]
-        rect = [cv2.minAreaRect(c) for c in c]
-        bbox = [cv2.boxPoints(c) for c in rect]
-        bbox = np.array(bbox)
-        if len(bounds) == 0:
-            return []
-        scores = [self.calculate(b, mask) for b in bounds]
-        bounds = np.array(bounds)
-        scores = np.expand_dims(np.array(scores), axis=-1)
-        keep = py_cpu_nms(np.hstack([bounds, scores]), self.nms_threshold)
-        return bbox[keep]
+        # bounds = [cv2.boundingRect(c) for c in cnts if cv2.contourArea(c) > min_area]
+        bbox = None
+        if len(cnts) != 0:
+            c = max(cnts, key=cv2.contourArea)
+            rect = cv2.minAreaRect(c)
+            bbox = cv2.boxPoints(rect)
+        # bbox = np.array(bbox)
+        # if len(bounds) == 0:
+        #     return []
+        # scores = [self.calculate(b, mask) for b in bounds]
+        # bounds = np.array(bounds)
+        # scores = np.expand_dims(np.array(scores), axis=-1)
+        # keep = py_cpu_nms(np.hstack([bounds, scores]), self.nms_threshold)
+            if self.frame_cnt == 100:
+                pd.calibration()
+            elif self.frame_cnt > 200 and self.frame_cnt % 100 == 0:
+                print(pd.length())
+            self.frame_cnt += 1
+            pd.update(rect[2], bbox, time.time_ns())
+        return bbox
 
     def calculate(self, bound, mask):
         x, y, w, h = bound
@@ -171,4 +141,4 @@ class Detector(object):
 
 if __name__ == "__main__":
     detector = Detector()
-    detector.catch_video(0, bias_num=2, iterations=3, k_size=5, show_test=True, enhance=False)
+    detector.catch_video(0, bias_num=2, iterations=3, k_size=5, show_test=False, enhance=True)
