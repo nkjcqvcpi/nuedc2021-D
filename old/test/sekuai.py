@@ -23,10 +23,12 @@ while cam.isOpened():
         rect = cv2.minAreaRect(c)
         bbox = cv2.boxPoints(rect)
         pd.update(rect[2], bbox, time.time_ns())
-        if frame_cnt % 64 == 0:
+        if frame_cnt > 0 and frame_cnt % 100 == 0:
             pd.calibration()
-        elif frame_cnt % 100 == 0:
+        if frame_cnt > 100 and frame_cnt % 100 == 0:
             print(pd.length())
+        cv2.line(frame, (int(pd.pointer.refx), 0), (int(pd.pointer.refx), 360), (0, 255, 255), 2)
+        cv2.putText(frame, 'frame:{}'.format(frame_cnt), (0, 20), cv2.FONT_HERSHEY_COMPLEX, 1, (0, 255, 255))
         cv2.drawContours(frame, [np.int0(bbox)], -1, (0, 255, 255), 2)
         frame_cnt += 1
 

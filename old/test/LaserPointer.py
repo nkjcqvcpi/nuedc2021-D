@@ -14,6 +14,7 @@ class LaserPointer:
     centers = []
     bboxs = []
     angles = []
+    direction = 'left'
 
     def __init__(self, frame_size):
         self.cfp = open('../centers_{}.csv'.format(time.strftime("%d_%H-%M-%S", time.localtime())), mode='w')
@@ -24,7 +25,7 @@ class LaserPointer:
         self.afp.write('time, angle\n')
         self.lfp = open('../length_{}.csv'.format(time.strftime("%d_%H-%M-%S", time.localtime())), mode='w')
         self.lfp.write('time, T, length\n')
-        self.pre_c = 0
+        self.pre_x = 0
         self.refx = frame_size[0]
         self.frame = 0
         self.flag = False
@@ -32,15 +33,19 @@ class LaserPointer:
     def center(self, t):
         c = np.mean(self.bbox, axis=0)
         if not self.flag:
-            self.pre_c = c[0]
-        if self.pre_c < self.refx < c[0]:
-            self.centers.append((c, t, 1))
-        elif self.pre_c > self.refx > c[0]:
-            self.centers.append((c, t, -1))
-        elif self.refx == c[0]:
-            self.centers.append((c, t, 0))
-        else:
-            self.centers.append((c, t, 2))
+            self.pre_x = c[0]
+        if self.pre_x < c[0]:
+            s = 0
+            if self.direction == 'left':
+                self.direction = 'right'
+                s = -1
+            self.centers.append((c, t, s))
+        elif self.pre_x > c[0]:
+            s = 0
+            if self.direction == 'right':
+                self.direction = 'left'
+                s = 1
+            self.centers.append((c, t, s))
         self.cfp.write('{}, {}, {}\n'.format(t, c[0], c[1]))
         self.pre_c = c[0]
         self.frame += 1
